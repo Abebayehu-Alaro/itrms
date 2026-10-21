@@ -5,10 +5,10 @@
  * transaction, so a pooled connection never carries one request's context into the next.
  */
 import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
-import { bindContext } from './audit';
+import { bindContext, recordEvent, type AuditEvent } from './audit';
 import type { DbContext, Tx } from './types';
 
 export type { Db, DbContext, Tx } from './types';
@@ -16,9 +16,24 @@ export type { Db, DbContext, Tx } from './types';
 export interface Database {
     /** Runs `fn` in one transaction with `ctx` set for RLS and the audit log; commits when it returns, rolls back when it throws. */
     scoped<T>(ctx: DbContext, fn: (tx: Tx) => Promise<T>): Promise<T>;
+    /**
+     * A sensitive event (a denial, a reveal, an export) in a short transaction of its own, committed at once: it stays on
+     * record even when the request that caused it fails (ADR-0031, architecture.md §15). It uses a small pool of its own,
+     * so a request that already holds a connection cannot wait on itself.
+     */
+    recordSensitiveEvent(ctx: DbContext, event: AuditEvent): Promise<void>;
     /** `select 1`, for the readiness check. */
     ping(): Promise<void>;
     close(): Promise<void>;
+}
+
+export interface DatabaseOptions {
+    max?: number;
+    applicationName?: string;
+    /** The installation's HMAC key for masked audit columns (AUDIT_HMAC_KEY). */
+    auditKey?: string;
+    /** An idle connection failed (the server restarted, an admin ended it): the pool replaces it; log it. */
+    onError?: (error: Error) => void;
 }
 
 const SETTINGS: [keyof DbContext, string][] = [
@@ -30,18 +45,26 @@ const SETTINGS: [keyof DbContext, string][] = [
     ['ip', 'app.ip']
 ];
 
-export function createDatabase(url: string, options: { max?: number; applicationName?: string } = {}): Database {
-    const pool = new Pool({
-        connectionString: url,
-        max: options.max ?? 10,
-        application_name: options.applicationName ?? 'itrms-api',
-        // a statement that runs away is cut, so one request cannot hold a connection for ever
-        statement_timeout: 30_000
-    });
-    const db = drizzle(pool);
-    return {
-        scoped(ctx, fn) {
-            return db.transaction(async (tx) => {
+export function createDatabase(url: string, options: DatabaseOptions = {}): Database {
+    const pool = (max: number, suffix = '') => {
+        const p = new Pool({
+            connectionString: url,
+            max,
+            application_name: `${options.applicationName ?? 'itrms-api'}${suffix}`,
+            // a statement that runs away is cut, so one request cannot hold a connection for ever
+            statement_timeout: 30_000
+        });
+        // without a listener an idle client's error would end the process; the readiness check reports the outage
+        p.on('error', (error) => options.onError?.(error));
+        return p;
+    };
+    const main = pool(options.max ?? 10);
+    const events = pool(2, '-audit');
+
+    const scopedOn =
+        (db: NodePgDatabase) =>
+        <T>(ctx: DbContext, fn: (tx: Tx) => Promise<T>): Promise<T> =>
+            db.transaction(async (tx) => {
                 // one round trip; '' for anything unknown (the policies read settings null-safely: nullif(…, ''))
                 await tx.execute(
                     sql`select ${sql.join(
@@ -49,15 +72,20 @@ export function createDatabase(url: string, options: { max?: number; application
                         sql`, `
                     )}`
                 );
-                bindContext(tx, ctx);
+                bindContext(tx, ctx, options.auditKey);
                 return fn(tx);
             });
-        },
+    const scoped = scopedOn(drizzle(main));
+    const scopedEvent = scopedOn(drizzle(events));
+
+    return {
+        scoped,
+        recordSensitiveEvent: (ctx, event) => scopedEvent(ctx, (tx) => recordEvent(tx, event)),
         async ping() {
-            await pool.query('select 1');
+            await main.query('select 1');
         },
         async close() {
-            await pool.end();
+            await Promise.all([main.end(), events.end()]);
         }
     };
 }

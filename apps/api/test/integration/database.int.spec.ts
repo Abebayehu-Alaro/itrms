@@ -23,8 +23,10 @@ import {
     recordEvent,
     ROLES_SQL,
     updateAudited,
-    type Database
+    type Database,
+    type Tx
 } from '@itrms/kernel/db';
+import { ForbiddenError } from '@itrms/kernel/errors';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
@@ -41,6 +43,15 @@ const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'dr
 
 const sample = pgSchema('sample');
 const things = audited(sample.table('things', { ...baseColumns(), name: text('name').notNull() }));
+const people = audited(
+    sample.table('people', {
+        ...baseColumns(),
+        name: text('name').notNull(),
+        phone: text('phone'),
+        totpSeed: text('totp_seed')
+    }),
+    { mask: ['phone'], omit: ['totpSeed'] }
+);
 const scratch = notAudited(sample.table('scratch', { ...baseColumns(), note: text('note') }), 'test table');
 
 const password = () => randomBytes(12).toString('hex');
@@ -100,10 +111,12 @@ beforeAll(async () => {
             updated_at timestamptz NOT NULL DEFAULT now(), updated_by uuid, row_version integer NOT NULL DEFAULT 1,
             name text NOT NULL);
         CREATE TABLE sample.scratch (LIKE sample.things INCLUDING ALL);
+        CREATE TABLE sample.people (LIKE sample.things INCLUDING ALL);
+        ALTER TABLE sample.people ADD COLUMN phone text, ADD COLUMN totp_seed text;
         GRANT USAGE ON SCHEMA sample TO itrms_app;
-        GRANT SELECT, INSERT, UPDATE, DELETE ON sample.things, sample.scratch TO itrms_app;`);
+        GRANT SELECT, INSERT, UPDATE, DELETE ON sample.things, sample.scratch, sample.people TO itrms_app;`);
 
-    db = createDatabase(urlFor('itrms_app', PASSWORDS.app));
+    db = createDatabase(urlFor('itrms_app', PASSWORDS.app), { auditKey: randomBytes(32).toString('hex') });
 }, 240_000);
 
 afterAll(async () => {
@@ -137,34 +150,69 @@ describe('the role bootstrap and the migrations', () => {
             '/tmp/roles.psql'
         ]);
         expect(again.exitCode).toBe(0);
+        const { rows: limits } = await owner.query<{ rolname: string; rolreplication: boolean; members: number }>(`
+            SELECT r.rolname, r.rolreplication,
+                   (SELECT count(*)::int FROM pg_auth_members a WHERE a.member = r.oid) AS members
+            FROM pg_roles r WHERE starts_with(r.rolname, 'itrms_') ORDER BY r.rolname`);
+        expect(limits).toEqual([
+            { rolname: 'itrms_app', rolreplication: false, members: 0 },
+            { rolname: 'itrms_backup', rolreplication: true, members: 0 },
+            { rolname: 'itrms_owner', rolreplication: false, members: 0 },
+            { rolname: 'itrms_system', rolreplication: false, members: 0 }
+        ]);
+    });
+
+    it('keep the migration history to the owner, and business data from the backup role', async () => {
+        for (const [role, pw] of [
+            ['itrms_system', PASSWORDS.system],
+            ['itrms_app', PASSWORDS.app],
+            ['itrms_backup', PASSWORDS.backup]
+        ] as const) {
+            const client = new Client({ connectionString: urlFor(role, pw) });
+            await client.connect();
+            try {
+                await expect(client.query('SELECT 1 FROM drizzle.__drizzle_migrations')).rejects.toMatchObject({
+                    code: '42501'
+                });
+                if (role === 'itrms_backup')
+                    await expect(client.query('SELECT 1 FROM kernel.audit_log')).rejects.toMatchObject({
+                        code: '42501'
+                    });
+            } finally {
+                await client.end();
+            }
+        }
     });
 });
 
 describe('the audited write helpers', () => {
     it('write exactly one audit row per insert, update and delete, in the same transaction', async () => {
-        const inTx = async (rowId: string, action: string) => {
-            // the audit row is visible inside the transaction and was written by it (its xmin is this transaction)
-            return db.scoped(ctx, async (tx) => {
-                const { rows } = await tx.execute<{ same_tx: boolean }>(sql`
-                    select (xmin::text = (pg_current_xact_id()::text::bigint % 4294967296)::text) as same_tx
-                    from kernel.audit_log where row_id = ${rowId} and action = ${action}`);
-                return rows;
-            });
+        // the audit row of `action` was written by the transaction `tx` is (its xmin is this transaction's id)
+        const writtenHere = async (tx: Tx, rowId: string, action: string) => {
+            const { rows } = await tx.execute<{ same_tx: boolean }>(sql`
+                select (xmin::text = (pg_current_xact_id()::text::bigint % 4294967296)::text) as same_tx
+                from kernel.audit_log where row_id = ${rowId} and action = ${action}`);
+            return rows;
         };
         const created = await db.scoped(ctx, async (tx) => {
             const row = await insertAudited(tx, things, { name: 'first' });
-            const { rows } = await tx.execute<{ same_tx: boolean }>(sql`
-                select (xmin::text = (pg_current_xact_id()::text::bigint % 4294967296)::text) as same_tx
-                from kernel.audit_log where row_id = ${row.id}`);
-            expect(rows).toEqual([{ same_tx: true }]);
+            expect(await writtenHere(tx, row.id, 'insert')).toEqual([{ same_tx: true }]);
             return row;
         });
         expect(created).toMatchObject({ name: 'first', rowVersion: 1, createdBy: ctx.userId });
-        expect(await inTx(created.id, 'insert')).toEqual([{ same_tx: false }]); // committed by the earlier transaction
 
-        const updated = await db.scoped(ctx, (tx) => updateAudited(tx, things, created.id, 1, { name: 'second' }));
+        const updated = await db.scoped(ctx, async (tx) => {
+            const row = await updateAudited(tx, things, created.id, 1, { name: 'second' });
+            expect(await writtenHere(tx, created.id, 'update')).toEqual([{ same_tx: true }]);
+            // the insert's row is there, written by an earlier transaction
+            expect(await writtenHere(tx, created.id, 'insert')).toEqual([{ same_tx: false }]);
+            return row;
+        });
         expect(updated).toMatchObject({ name: 'second', rowVersion: 2, updatedBy: ctx.userId });
-        await db.scoped(ctx, (tx) => deleteAudited(tx, things, created.id, 2));
+        await db.scoped(ctx, async (tx) => {
+            await deleteAudited(tx, things, created.id, 2);
+            expect(await writtenHere(tx, created.id, 'delete')).toEqual([{ same_tx: true }]);
+        });
 
         const rows = await auditOf(created.id);
         expect(rows.map((r) => r.action)).toEqual(['insert', 'update', 'delete']);
@@ -192,6 +240,56 @@ describe('the audited write helpers', () => {
         const { rows } = await owner.query('SELECT 1 FROM sample.things WHERE id = $1', [id]);
         expect(rows).toEqual([]);
         expect(await auditOf(id)).toEqual([]);
+
+        // an update and a delete rolled back: the row as it was, and only its insert in the log
+        const row = await db.scoped(ctx, (tx) => insertAudited(tx, things, { name: 'kept' }));
+        for (const change of [
+            (tx: Tx) => updateAudited(tx, things, row.id, 1, { name: 'changed' }),
+            (tx: Tx) => deleteAudited(tx, things, row.id, 1)
+        ])
+            await expect(
+                db.scoped(ctx, async (tx) => {
+                    await change(tx);
+                    throw new Error('the request failed');
+                })
+            ).rejects.toThrow('the request failed');
+        const { rows: kept } = await owner.query('SELECT name, row_version FROM sample.things WHERE id = $1', [row.id]);
+        expect(kept).toEqual([{ name: 'kept', row_version: 1 }]);
+        expect((await auditOf(row.id)).map((r) => r.action)).toEqual(['insert']);
+    });
+
+    it('keep a sensitive event on record although the request rolls back', async () => {
+        const rowId = '0199f0a0-0000-7000-8000-0000000000aa';
+        await expect(
+            db.scoped(ctx, async () => {
+                await db.recordSensitiveEvent(ctx, { type: 'access.denied', table: things, rowId });
+                throw new ForbiddenError();
+            })
+        ).rejects.toBeInstanceOf(ForbiddenError);
+        expect(await auditOf(rowId)).toMatchObject([
+            { action: 'event', eventType: 'access.denied', actorId: ctx.userId }
+        ]);
+    });
+
+    it('never log an omitted column, log a masked one as an HMAC, and money at any depth as text', async () => {
+        const created = await db.scoped(ctx, (tx) =>
+            insertAudited(tx, people, { name: 'Abebe', phone: '+251911000000', totpSeed: 'JBSWY3DPEHPK3PXP' })
+        );
+        await db.scoped(ctx, (tx) => updateAudited(tx, people, created.id, 1, { phone: '+251911000001' }));
+        await db.scoped(ctx, (tx) =>
+            recordEvent(tx, { type: 'fee.refunded', rowId: created.id, data: { fee: { amountSantim: 150050n } } })
+        );
+        const [insert, update, event] = await auditOf(created.id);
+        const text = JSON.stringify([insert?.diff, update?.diff]);
+        expect(text).not.toMatch(/JBSWY3DPEHPK3PXP|totpSeed|\+2519110000/);
+        expect(insert?.diff).toMatchObject({
+            after: { name: 'Abebe', phone: expect.stringMatching(/^hmac:[0-9a-f]{64}$/) as string }
+        });
+        // the HMAC proves the phone changed without saying to what
+        expect((update?.diff as { before: { phone: string }; after: { phone: string } }).before.phone).not.toBe(
+            (update?.diff as { after: { phone: string } }).after.phone
+        );
+        expect(event?.diff).toEqual({ fee: { amountSantim: '150050' } });
     });
 
     it('refuse a stale row_version (409 stale_version) and leave the row as it was', async () => {

@@ -5,10 +5,18 @@
  */
 import { fileURLToPath } from 'node:url';
 
-export { createDatabase, type Database, type Db, type DbContext, type Tx } from './database';
+export { createDatabase, type Database, type DatabaseOptions, type Db, type DbContext, type Tx } from './database';
 export { baseColumns, ltree, newId } from './columns';
-export { audited, auditPolicyOf, notAudited } from './audit-policy';
-export { deleteAudited, insertAudited, recordEvent, updateAudited, type BaseTable } from './audit';
+export { audited, auditOptionsOf, auditPolicyOf, notAudited, type AuditOptions } from './audit-policy';
+export {
+    deleteAudited,
+    insertAudited,
+    plain,
+    recordEvent,
+    updateAudited,
+    type AuditEvent,
+    type BaseTable
+} from './audit';
 export { AUDIT_ACTIONS, auditLog, kernelSchema, type AuditAction } from './audit-log.table';
 
 /** The role bootstrap (roles.psql), run by a superuser before the migrations: the dev stack and the tests read it. */

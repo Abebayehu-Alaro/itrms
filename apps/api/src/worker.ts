@@ -13,7 +13,11 @@ import { fail, start } from './start';
 async function main() {
     const { config, logger } = start('worker');
     try {
-        const database = createDatabase(config.DATABASE_URL, { applicationName: 'itrms-worker' });
+        const database = createDatabase(config.DATABASE_URL, {
+            applicationName: 'itrms-worker',
+            auditKey: config.AUDIT_HMAC_KEY,
+            onError: (err) => logger.warn({ err }, 'an idle database connection failed')
+        });
         await createWorkerContext(AppModule.forRoot(config, logger, { database }), logger);
         // nothing to consume yet: an idle timer keeps the process alive until its stop signal
         setInterval(() => undefined, 60_000);
