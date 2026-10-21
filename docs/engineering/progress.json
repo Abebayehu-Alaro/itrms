@@ -224,8 +224,8 @@
         {
           "id": "0.7",
           "title": "Database foundation and audit log",
-          "status": "ready",
-          "branch": null,
+          "status": "in progress",
+          "branch": "task/0.7-database-audit",
           "commits": [],
           "evidence": [],
           "blockers": [],

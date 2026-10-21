@@ -55,6 +55,8 @@ function isAddressOrRange(value: string): boolean {
 const schemas = {
     http: z.object({
         ...common,
+        /** The API's pool: role itrms_app, subject to RLS. */
+        DATABASE_URL: postgresUrl,
         PORT: z.coerce.number().int().min(1).max(65535).default(4000),
         HOST: z.string().min(1).default('127.0.0.1'),
         /**
@@ -76,11 +78,15 @@ const schemas = {
     }),
     worker: z.object({
         ...common,
+        /** The worker's request-like work: role itrms_app. */
+        DATABASE_URL: postgresUrl,
+        /** The system pool (role itrms_system, BYPASSRLS): outbox relay and sweeps (task 0.11). */
         DATABASE_SYSTEM_URL: postgresUrl.optional()
     }),
     migrate: z.object({
         ...common,
-        DATABASE_MIGRATE_URL: postgresUrl.optional()
+        /** The migration owner: role itrms_owner. */
+        DATABASE_MIGRATE_URL: postgresUrl
     })
 };
 
