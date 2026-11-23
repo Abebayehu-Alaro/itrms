@@ -1,7 +1,7 @@
 # ADR 0035: CI in two tiers, the full record once per batch of related tasks
 
-* Status: **proposed** (2026-11-23). On acceptance it **amends ADR-0034** (local Linux CI) and `workflow.md` §1, §3 and
-  §5 as listed under "Changes on acceptance".
+* Status: accepted (2026-11-23). It **amends ADR-0034** (local Linux CI) and `workflow.md` §1, §3 and §5, as listed
+  under "Changes on acceptance" (applied the same day).
 
 ## Context
 * ADR-0034 makes a complete, passing `pnpm ci:local` record the CI evidence, and `workflow.md` §3.2 asks for one for every

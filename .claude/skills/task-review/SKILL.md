@@ -10,9 +10,13 @@ Rules: `docs/engineering/workflow.md` §3–§5. **Never move a task to `done` w
 
 ## A. Put the task up for review
 1. Identify the task: the argument, or the one `in progress`.
-2. **Run the checks** that exist at this stage of the project:
-   - lint, typecheck, unit, integration and e2e tests;
-   - security scans and the i18n check.
+2. **Run the checks** that exist at this stage of the project, at the **task tier** (ADR-0035):
+   - `pnpm ci:local --jobs checks,gitleaks,trivy` on the task's last commit (clean clone: lint, typecheck, unit tests,
+     build, `pnpm audit --audit-level high`, the scanners); its evidence line says PARTIAL;
+   - the integration suites of the packages the task changed, the stories job if it changed `packages/ui` or a screen,
+     the e2e journeys it affects, and the i18n check.
+   - If the task is the **last of its batch** (the `Batch:` line in the phase file), or a batch of one, also make the
+     **complete** record: `pnpm ci:local` with every job.
 
    Delegate the runs to the `test-runner` agent and record the **actual counts**. Never write "should pass".
 3. **Walk the "Done when" items** of the task (phase file) and the 12 points of the definition of done. Write one evidence
@@ -38,12 +42,17 @@ Rules: `docs/engineering/workflow.md` §3–§5. **Never move a task to `done` w
 
 ## B. When the product owner approves (`/task-review approve <id>`)
 Only after an explicit approval in the conversation:
-1. Squash-merge the branch into `main` (workflow.md §5: linear history), with a conventional message naming the task:
-   `git checkout main && git merge --squash task/<…> && git commit`. Branch commit SHAs recorded earlier become
-   unreachable after the squash; the squash commit is the one that counts.
-2. Record it: `node tools/progress/cli.mjs set <id> done --approved --commit <squash-sha>`. Mark the next task `ready`
-   if its definition of ready holds.
-3. Commit the progress files on `main` as a separate commit, `docs(progress): task <id> done`. Don't amend the squash
+1. **Not the last task of its batch:** record the approval (`node tools/progress/cli.mjs note <id> "approved; merges with
+   batch B…"`) and leave the task "in review", unmerged. The next task of the batch branches from it.
+2. **The last task of its batch** (or a batch of one): check that the batch's last commit has a complete, passing
+   `pnpm ci:local` record. Then squash-merge every task of the batch into `main` in order (workflow.md §5: linear
+   history), one conventional commit per task naming it, with no other commit in between:
+   `git checkout main && git merge --squash <task's last commit> && git commit`. Then check that
+   `git rev-parse <recorded sha>^{tree}` equals `git rev-parse main^{tree}`; if not, the record does not count, so stop
+   and report it. Branch commit SHAs recorded earlier become unreachable after the squash; the squash commits count.
+3. Record each task: `node tools/progress/cli.mjs set <id> done --approved --commit <its squash-sha>`. Mark the next
+   task `ready` if its definition of ready holds.
+4. Commit the progress files on `main` as a separate commit, `docs(progress): task <id> done`. Don't amend the squash
    commit: amending changes its SHA, and the recorded SHA would point at a commit that no longer exists.
-4. Refresh the dashboard.
-5. **Do not push**: pushing needs its own approval, and the guard hook asks for it.
+5. Refresh the dashboard.
+6. **Do not push**: pushing needs its own approval, and the guard hook asks for it.
