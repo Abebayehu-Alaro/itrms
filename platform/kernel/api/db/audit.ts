@@ -91,6 +91,22 @@ function auditable(row: Record<string, unknown>, options: AuditOptions, auditKey
 /** What changes on every write: not part of what the person changed. */
 const BOOKKEEPING = new Set(['updatedAt', 'updatedBy', 'rowVersion']);
 
+/**
+ * The provenance columns the helpers set themselves. A caller that passes one (a DTO spread straight into a write) could
+ * back-date a row, take it over or reset its version, and the audit log would record the forgery as fact, so it is refused
+ * rather than dropped. An insert may name its `id` (an id generated earlier, for idempotency); an update never changes it.
+ */
+const SET_BY_INSERT = ['createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'rowVersion'];
+const SET_BY_UPDATE = ['id', ...SET_BY_INSERT];
+
+function assertNoProvenance(table: PgTable, values: object, keys: string[]) {
+    const named = keys.filter((k) => k in values);
+    if (named.length > 0)
+        throw new Error(
+            `${nameOf(table)}: ${named.join(', ')} cannot be written by the caller; the write helpers set it`
+        );
+}
+
 async function writeAudit(
     tx: Tx,
     entry: { action: AuditAction; table?: PgTable; rowId?: string; eventType?: string; diff?: unknown }
@@ -117,6 +133,7 @@ export async function insertAudited<T extends BaseTable>(
     values: InferInsertModel<T>
 ): Promise<InferSelectModel<T>> {
     assertAudited(table);
+    assertNoProvenance(table, values, SET_BY_INSERT);
     const { ctx, auditKey } = bindingOf(tx);
     const rows = (await tx
         .insert(table)
@@ -155,6 +172,7 @@ export async function updateAudited<T extends BaseTable>(
     changes: Partial<InferInsertModel<T>>
 ): Promise<InferSelectModel<T>> {
     assertAudited(table);
+    assertNoProvenance(table, changes, SET_BY_UPDATE);
     const { ctx, auditKey } = bindingOf(tx);
     const before = await lockCurrent(tx, table, id, expectedVersion);
     const rows = (await tx

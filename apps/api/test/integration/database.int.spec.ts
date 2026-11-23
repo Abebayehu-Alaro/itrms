@@ -309,6 +309,33 @@ describe('the audited write helpers', () => {
         expect((await auditOf(row.id)).map((r) => r.action)).toEqual(['insert', 'update']);
     });
 
+    it('refuse provenance columns from the caller, and write nothing', async () => {
+        const row = await db.scoped(ctx, (tx) => insertAudited(tx, things, { name: 'original' }));
+        const forged = { createdBy: '0199f0a0-0000-7000-8000-0000000000ff', createdAt: new Date('2001-01-01') };
+        await expect(
+            db.scoped(ctx, (tx) => insertAudited(tx, things, { name: 'back-dated', ...forged }))
+        ).rejects.toThrow(/sample.things: createdAt, createdBy cannot be written by the caller/);
+        await expect(
+            db.scoped(ctx, (tx) => insertAudited(tx, things, { name: 'reset', rowVersion: 99 }))
+        ).rejects.toThrow(/rowVersion cannot be written/);
+        await expect(
+            db.scoped(ctx, (tx) => updateAudited(tx, things, row.id, 1, { name: 'taken over', ...forged }))
+        ).rejects.toThrow(/createdAt, createdBy cannot be written/);
+        await expect(
+            db.scoped(ctx, (tx) => updateAudited(tx, things, row.id, 1, { id: '0199f0a0-0000-7000-8000-0000000000fe' }))
+        ).rejects.toThrow(/id cannot be written/);
+
+        // an insert may still name an id generated earlier (idempotent retries)
+        const id = '0199f0a0-0000-7000-8000-0000000000fd';
+        expect(await db.scoped(ctx, (tx) => insertAudited(tx, things, { id, name: 'own id' }))).toMatchObject({ id });
+
+        const { rows } = await owner.query('SELECT name, row_version, created_by FROM sample.things WHERE id = $1', [
+            row.id
+        ]);
+        expect(rows).toEqual([{ name: 'original', row_version: 1, created_by: ctx.userId }]);
+        expect((await auditOf(row.id)).map((r) => r.action)).toEqual(['insert']);
+    });
+
     it('refuse a table that is not declared audited, and a transaction not opened by scoped', async () => {
         await expect(db.scoped(ctx, (tx) => insertAudited(tx, scratch, { note: 'x' }))).rejects.toThrow(
             /sample.scratch is not declared audited/
