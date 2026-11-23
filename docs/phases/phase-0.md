@@ -209,7 +209,9 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Do:**
   - `rlsPolicies(table, 'registry' | 'transaction' | 'config' | 'party')` migration helper (policies `TO itrms_app`,
     null-safe settings `nullif(current_setting(…, true), '')`, region check in every class, class-R writes limited to
-    records the unit handles), and policies on every tenant table built so far (ADR-0031).
+    records the unit handles), and policies on every tenant table built so far (ADR-0031), `kernel.audit_log`
+    included: people read the audit of their scope, and its INSERT policy pins `actor_id`, `unit_id` and `region_id` to
+    the request's settings (follow-ups from 0.7).
   - DB roles `itrms_owner`, `itrms_app`, `itrms_system` (BYPASSRLS, worker pool only), `itrms_backup`. **No bypass
     setting.**
   - The `org_path` denormalisation trigger for transaction tables.

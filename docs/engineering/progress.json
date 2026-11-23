@@ -1,7 +1,7 @@
 {
   "project": "ITRMS",
   "vendor": "ABA Nexus Technologies",
-  "updated": "2026-10-21",
+  "updated": "2026-11-23",
   "statuses": [
     "planned",
     "ready",
@@ -224,12 +224,25 @@
         {
           "id": "0.7",
           "title": "Database foundation and audit log",
-          "status": "in progress",
-          "branch": "task/0.7-database-audit",
-          "commits": [],
-          "evidence": [],
+          "status": "in review",
+          "branch": "ccr-35d43704-yvse43",
+          "commits": [
+            "a070a51"
+          ],
+          "evidence": [
+            "pnpm ci:local a070a51 (Docker 29.10.0, 711 s; report .ci-local/a070a5132258/report.md) → checks ✓ (install, check:slices, boundaries, test:tools, format:check, turbo lint/typecheck/test/build, pnpm audit --audit-level high), stories ✓, infra ✓ (dev:infra --observability, dev:infra:check, test:int), gitleaks ✓ (6 commits), trivy ✓; semgrep NOT RUN (semgrep.dev blocked by the session's network policy, follow-up)",
+            "pnpm --filter @itrms/api test:int → 11/11 passed on PostgreSQL 16.15 (Testcontainers, pinned digest): apps/api/test/integration/database.int.spec.ts",
+            "Done when 1 (one audit row per insert/update/delete, same transaction): test 'write exactly one audit row per insert, update and delete, in the same transaction' (checks the audit row's xmin is the writing transaction)",
+            "Done when 2 (rollback leaves neither row nor audit): test 'leave neither the row nor its audit after a rollback' (insert, update and delete)",
+            "Done when 3 (UPDATE/DELETE on audit_log fails): test 'refuses UPDATE, DELETE and TRUNCATE: the API role has no such privilege, and the trigger stops even the owner'",
+            "Done when 4 (stale row_version → 409): tests 'refuse a stale row_version (409 stale_version)…' and 'answers a stale row_version with 409 problem+json stale_version' (HTTP)",
+            "Tests: every table audited unless allowlisted → apps/api/src/audit-coverage.spec.ts (globs every platform/modules *.table.ts, the same globs as drizzle.config.ts)",
+            "Migrations: drizzle-kit generate → 'No schema changes, nothing to migrate'; applied from zero in the int tests and the infra job",
+            "pnpm audit --audit-level high → no high or critical advisory (was 4 critical, 11 high before b1d58bb and a070a51)",
+            "Security: task-verifier → all Done-when items met; security reviewer → no high findings, fixes in b1fdc24 and bb8d109 (password-log fix shown by a mutation check), the rest in follow-ups (0.9, 0.11, 0.14, 0.26)"
+          ],
           "blockers": [],
-          "notes": "2026-10-21: 11cf7f2. Roles bootstrap (kernel db/sql/roles.psql, idempotent, passwords via psql variables on stdin; dev:infra applies it every start); @itrms/kernel/db: createDatabase + scoped (set_config locals), base columns (UUIDv7 app-side, row_version), kernel.audit_log + audited helpers (insert/update/delete with FOR UPDATE + version check → 409 stale_version, recordEvent), audited()/notAudited() registry; apps/api/drizzle: 0000 generated + 0001 hand-written (CHECKs, append-only trigger incl. TRUNCATE, grants app SELECT/INSERT); migrate process applies as itrms_owner; DATABASE_URL/DATABASE_MIGRATE_URL; readiness check; Testcontainers int tests 7/7 (apps/api test:int), audit coverage test. Follow-ups to record: hash chain + monthly partitions + PII masking in diffs; sensitive events in their own transaction."
+          "notes": "2026-10-21: 11cf7f2. Roles bootstrap (kernel db/sql/roles.psql, idempotent, passwords via psql variables on stdin; dev:infra applies it every start); @itrms/kernel/db: createDatabase + scoped (set_config locals), base columns (UUIDv7 app-side, row_version), kernel.audit_log + audited helpers (insert/update/delete with FOR UPDATE + version check → 409 stale_version, recordEvent), audited()/notAudited() registry; apps/api/drizzle: 0000 generated + 0001 hand-written (CHECKs, append-only trigger incl. TRUNCATE, grants app SELECT/INSERT); migrate process applies as itrms_owner; DATABASE_URL/DATABASE_MIGRATE_URL; readiness check; Testcontainers int tests 7/7 (apps/api test:int), audit coverage test. Follow-ups to record: hash chain + monthly partitions + PII masking in diffs; sensitive events in their own transaction. 2026-11-23: continued on ccr-35d43704-yvse43 (the session's push branch), which holds task/0.7-database-audit (11cf7f2, 2b45f6f) plus b1fdc24 (helpers refuse caller-set created/updated by/at, row_version, and id on update), bb8d109 (security review: HMAC over table.column + value, lock_timeout and idle_in_transaction_session_timeout, roles.psql keeps passwords out of the server log, tested with a mutation check), b1d58bb (undici 8.12.4) and a070a51 (patched the 4 critical and 7 high advisories already on main: next 16.4.1, storybook 10.6.2, zod 4.6.6, re2js 2.8.7, happy-dom 21.0.4). Migrations are 0000 (generated), 0001 and 0002 (hand-written). Supersedes the earlier '7/7' note: 11 integration tests. Verifier: every Done-when item met. Security reviewer: no high findings; 3 medium and 2 low fixed or recorded as follow-ups."
         },
         {
           "id": "0.8",
@@ -1216,6 +1229,39 @@
       "foundIn": "0.7",
       "item": "audit_log RLS (class T: people see the audit of their scope) with the isolation matrix",
       "movedTo": "0.9"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Security review M1: the default privileges give itrms_system (BYPASSRLS) SELECT/INSERT/UPDATE/DELETE on every table the owner creates, so each sensitive table needs its own REVOKE. Decide: grant itrms_system table by table (outbox, jobs) instead, or keep the defaults with a CI check against an allow-list",
+      "movedTo": "0.9"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Security review M2: itrms_app may INSERT any audit row (actor, unit, region, at). The audit_log INSERT policy pins actor_id/unit_id/region_id to the app.* settings (WITH CHECK); a column grant leaves out at and id; stop exporting auditLog to slices",
+      "movedTo": "0.9"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Security review M3: the audit policy is open by default (audited(table) logs every column; JSONB answers and event data unfiltered). Make it fail closed: classify sensitive columns, a column-name denylist test (*_ciphertext, *_secret, *_token, phone, fin, salary, bank*), a Zod shape for AuditEvent.data; AUDIT_HMAC_KEY required in production",
+      "movedTo": "0.14"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Security review L8: insertAudited accepts a caller-chosen id (for idempotent retries); take it only from the server-side idempotency record, never from a request body",
+      "movedTo": "0.11"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Security review L5, L6, L10: the installation script refuses empty or short role passwords (< 24 chars); decide whether itrms_backup needs CONNECT on itrms (pgBackRest); audit_log triggers ENABLE ALWAYS (session_replication_role=replica) and a CI check that no migration touches them",
+      "movedTo": "0.26"
+    },
+    {
+      "foundIn": "0.7",
+      "item": "Semgrep not run for 0.7: semgrep.dev is blocked by this cloud environment's network policy (rule download refused, 403). Run pnpm ci:local --jobs semgrep where semgrep.dev is reachable (owner's machine, or an environment that allows it)",
+      "movedTo": "0.8"
+    },
+    {
+      "movedTo": ""
     }
   ]
 }
