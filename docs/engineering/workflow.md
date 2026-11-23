@@ -16,8 +16,8 @@ planned → ready → in progress → in review → done
 | planned | listed in a phase file | — |
 | **ready** | meets the definition of ready (§2) | the product owner, or the session after checking §2 |
 | in progress | one branch, one task | the implementer |
-| in review | PR open, CI green, self-check done (§4) | the implementer |
-| **done** | meets the definition of done (§3); evidence in progress.md; merged | after review (§5) |
+| in review | PR open, task-tier CI green (ADR-0035), self-check done (§4) | the implementer |
+| **done** | meets the definition of done (§3); evidence in progress.md; merged with its batch | after review (§5) |
 | blocked | can't continue; the reason and the unblocker are written down | anyone |
 
 **One task at a time, in order, and only when asked** (CLAUDE.md). A task never starts while the previous one is in
@@ -34,8 +34,11 @@ A task may start only when:
 ## 3. Definition of done (all must hold)
 1. **Acceptance:** every "Done when" item of the task is demonstrated.
 2. **Tests:** the task's listed tests exist and pass. Lint, typecheck, unit, integration (real PostgreSQL 16) and the
-   affected e2e journeys are green locally and on CI. "On CI" is GitHub Actions for the commit, or a complete, passing local
-   Linux CI record (`pnpm ci:local`, ADR-0034) for the commit that is merged. No test is skipped or deleted to get green.
+   affected e2e journeys are green locally and on CI. "On CI" is GitHub Actions for the commit, or, with local Linux CI
+   (`pnpm ci:local`, ADR-0034), the task tier of ADR-0035 for the task's last commit and a complete, passing record for
+   the last commit of its batch, whose tree is the tree of `main` after the batch is merged. A task that changes roles,
+   grants, RLS, the audit log, auth, money, dependencies or CI is a batch of one. No test is skipped or deleted to get
+   green.
 3. **Isolation:** every new or changed tenant table has RLS policies of its class (`TO itrms_app`, null-safe), and the
    isolation matrix covers it, including the no-context case on a reused connection.
 4. **Audit:** every new write path writes audit rows in the same transaction, with sensitive fields masked (test asserts
@@ -65,8 +68,9 @@ A task may start only when:
 
 ## 5. Branches, commits, reviews
 * `main` is always releasable and protected (CI must pass, linear history).
-* One branch per task: `task/0.9-rls-isolation`. Squash-merge with a conventional commit
-  (`feat(platform): RLS policies and isolation matrix (task 0.9)`).
+* One branch per task: `task/0.9-rls-isolation`, branched from the previous task of its batch. Tasks are merged with
+  their batch (ADR-0035): once the batch has its complete record, in order, one squash commit per task, with a
+  conventional message (`feat(platform): RLS policies and isolation matrix (task 0.9)`).
 * PR description = the task's "Done when" as a checklist plus the evidence (§4). The template is
   `.github/pull_request_template.md` (created in task 0.2).
 * Code review: the product owner (or a named reviewer) approves. For sensitive changes, the reviewer agent's report is

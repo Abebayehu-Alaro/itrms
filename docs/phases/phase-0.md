@@ -181,6 +181,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** integration tests on a real Postgres (Testcontainers); a test that every table is audited unless allowlisted.
 
 ### 0.8 Org tree
+- **Batch:** B0-1: 0.8 (ADR-0035)
 - **Do:**
   - Tables `org_level_definitions`, `org_units` (ltree path maintained by triggers, `category`), and `org_departments`.
   - **Unit types** (ADR-0026, [org-and-unit-types.md](../platform/org-and-unit-types.md)):
@@ -206,6 +207,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** tree operations; path triggers; depth variants (3 levels, 2 levels, a city with sub-cities).
 
 ### 0.9 Row-level security and the isolation test matrix
+- **Batch:** B0-2: 0.9; a batch of one: RLS and roles (ADR-0035)
 - **Do:**
   - `rlsPolicies(table, 'registry' | 'transaction' | 'config' | 'party')` migration helper (policies `TO itrms_app`,
     null-safe settings `nullif(current_setting(…, true), '')`, region check in every class, class-R writes limited to
@@ -227,6 +229,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** generated per-table isolation tests (adding a tenant table without policies fails the suite).
 
 ### 0.10 Keycloak, BFF sign-in, guards, group sync
+- **Batch:** B0-3: 0.10; a batch of one: authentication and authorization (ADR-0035)
 - **Do:**
   - Realm export in `infra/compose/keycloak` (TOTP required, password policy, Amharic/English theme with Noto Sans
     Ethiopic).
@@ -260,6 +263,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** guard unit tests; an e2e sign-in with TOTP; a route-enumeration test; the cross-unit 403/404 test.
 
 ### 0.11 Numbering, idempotency, outbox, jobs
+- **Batch:** B0-4: 0.11, 0.12, 0.13 (ADR-0035)
 - **Do:**
   - `number_counters` + `nextNumber(tx, key, unit)` with patterns `{unit}/{seq:06}/{efy}` (EFY from 0.12; a stub until then),
     `start_after` seeding, used only for documents ITRMS issues. Case numbers use a plain sequence (ADR-0031).
@@ -274,6 +278,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** concurrency tests on Postgres; idempotency tests; outbox relay tests with a fake queue and a real Valkey.
 
 ### 0.12 Ethiopian calendar package
+- **Batch:** B0-4: 0.11, 0.12, 0.13 (ADR-0035)
 - **Do:** `packages/ethiopian-calendar`:
   - Gregorian ↔ Ethiopian conversion via JDN;
   - leap years, Pagume;
@@ -288,6 +293,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** a reference-table test, property tests (fast-check, MIT), formatting snapshots per language.
 
 ### 0.13 i18n platform
+- **Batch:** B0-4: 0.11, 0.12, 0.13 (ADR-0035)
 - **Do:**
   - `next-intl` in `apps/web` with `am` (default), `en` and **`wal-Latn`** (Wolaytta, Latin script; our own catalogue, no
     reliance on ICU data), fallback `wal-Latn → am → en` ([i18n-and-languages.md](../i18n-and-languages.md)).
@@ -305,6 +311,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** a catalogue completeness test; format tests (money from santim, Ethiopian dates); an e2e language switch.
 
 ### 0.14 People and organisations register
+- **Batch:** B0-5: 0.14, 0.15, 0.16 (ADR-0035)
 - **Do:**
   - `persons` (class R): names in Ethiopic and Latin script (given, father, grandfather), sex, birth year, address down to
     kebele.
@@ -322,6 +329,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   Amharic.
 
 ### 0.15 Files on object storage
+- **Batch:** B0-5: 0.14, 0.15, 0.16 (ADR-0035)
 - **Do:**
   - A `files` table. Uploads use a **presigned POST** with `content-length-range` and content-type conditions; multipart
     is bounded (part URLs only up to the declared size, a part cap, per-user quota). Objects go to a `quarantine/` prefix,
@@ -338,6 +346,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** API integration with the S3 container; authorization tests; the purge job test.
 
 ### 0.16 Forms API port with server-side validation
+- **Batch:** B0-5: 0.14, 0.15, 0.16 (ADR-0035)
 - **Do:** port `form_builder` and `form_submission` to `platform/forms`:
   - definitions, content-hashed immutable versions, publish (+ approval);
   - submissions pinned to a version;
@@ -354,6 +363,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   ported from `test_submission_query.py`; the e2e suite.
 
 ### 0.17 Form engine for ITRMS, part 1
+- **Batch:** B0-6: 0.17, 0.18, 0.18a (ADR-0035)
 - **Do:**
   - `I18nText` labels/help/placeholders/options/messages with a builder translation table and "missing" hints.
   - An `EthDate` field + `DatePicker` Ethiopian mode in `packages/ui` (stored ISO Gregorian).
@@ -365,6 +375,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   `requiredWhen`.
 
 ### 0.18 Form engine for ITRMS, part 2
+- **Batch:** B0-6: 0.17, 0.18, 0.18a (ADR-0035)
 - **Do:**
   - A `RegistryLookup` field type: a searchable picker over a registry (persons and organisations now; vehicles, licences
     and associations later, through a provider registry). It stores the id, shows the facts read-only, and the server checks
@@ -377,6 +388,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** component tests for both fields; API tests for lookup scope and fee consistency.
 
 ### 0.18a Form governance: contracts, stability, checks, tests
+- **Batch:** B0-6: 0.17, 0.18, 0.18a (ADR-0035)
 - **Do** ([form-platform.md](../platform/form-platform.md) §2–§4):
   - **Effect input contracts** in module manifests (Zod), a service-version mapping from contract paths to form keys,
     contract fields locked in the builder (key, type, required), and publish failing when a contract is unmet. This
@@ -404,6 +416,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   seeing the diff and the impact, and getting it approved.
 
 ### 0.19 Workflow engine, part 1: definitions, cases, transitions
+- **Batch:** B0-7: 0.19, 0.20 (ADR-0035)
 - **Do:**
   - The workflow definition schema:
     - state kinds `start`, `task`, **`wait`** (event and timeout transitions run by audited **system actors**), `end`;
@@ -428,6 +441,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   (tasks visible only to the assignee unit's role holders).
 
 ### 0.20 Workflow engine, part 2: SLA, inbox, case page, drafts, notifications
+- **Batch:** B0-7: 0.19, 0.20 (ADR-0035)
 - **Do:**
   - Working calendars per region/unit (working days and hours, lunch break, half days) + `holidays` (Ethiopian holidays
     seeded), and `due_at` computed by one application helper.
@@ -441,6 +455,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** due-date calculation tests (holidays, weekends, Addis time), SLA job tests, inbox e2e.
 
 ### 0.21 Service catalogue and configuration inheritance
+- **Batch:** B0-8: 0.21, 0.22, 0.23 (ADR-0035)
 - **Do:**
   - `service_definitions` (all 54 seeded with codes and Amharic/English names, most marked `not_configured`).
   - `service_versions` (form + workflow + fee rule + templates + `overridePolicy`), `service_overrides` (class C).
@@ -456,6 +471,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** resolution unit tests (precedence, disallowed keys, overlay conflicts) and integration tests across sibling units (Damot Gale, Boditi) and Test Zone B.
 
 ### 0.22 Fees, payment orders, cashier, receipts
+- **Batch:** B0-8 (0.21, 0.22, 0.23); money: a complete record of its own as well (ADR-0035)
 - **Do:**
   - Fee rules (versioned JSON, shared formula evaluator, integer santim, explicit rounding).
   - `fees.createPaymentOrder` effect; cashier screen (record cash / bank-slip payment); receipt numbers from counters; the
@@ -472,6 +488,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   test.
 
 ### 0.23 Document templates, PDF worker, QR verification
+- **Batch:** B0-8: 0.21, 0.22, 0.23 (ADR-0035)
 - **Do:**
   - `document_templates` (LiquidJS, versioned, data schema, unit header inheritance) and `issued_documents`.
   - A separate **`worker-documents`** service: Puppeteer with JavaScript disabled, no network, a `default-src 'none'` CSP,
@@ -487,6 +504,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** template data-schema tests, golden PDF text-extraction tests, a verification page test, a rate-limit test.
 
 ### 0.24 Driver-licence slice (competency module)
+- **Batch:** B0-9: 0.24, 0.25, 0.26 (ADR-0035)
 - **Do:** module `competency`:
   - `driver_licences`, `licence_grades`, `medical_certificates`, `training_enrolments`, `exam_sessions`/`exam_results`,
     `licence_print_batches`.
@@ -510,6 +528,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
   implementations share them).
 
 ### 0.25 Demo data and the demo journey
+- **Batch:** B0-9: 0.24, 0.25, 0.26 (ADR-0035)
 - **Do:**
   - Seed data as in [demo-plan.md](../demo-plan.md) §4 (generated, realistic, **no real people**): all Wolaita units, users
     in Damot Gale, Boditi and the zone, 3 training schools, ~200 persons, ~60 licences in mixed states, exam sessions, fee
@@ -522,6 +541,7 @@ the task must add. The [definition of done](../../CLAUDE.md#definition-of-done) 
 - **Tests:** the demo e2e (also a regression suite for later phases).
 
 ### 0.26 Demo installation and Phase 0 hardening
+- **Batch:** B0-9: 0.24, 0.25, 0.26 (ADR-0035)
 - **Do:**
   - Compose production profile (Nginx TLS, three hostnames, images from CI, `migrate` service, egress proxy, LUKS data
     volume, chrony) on a demo server.

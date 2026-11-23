@@ -1,6 +1,7 @@
 # ADR 0034: Local Linux CI while GitHub-hosted runners are unavailable
 
 * Status: accepted (2026-10-19). It **amends ADR-0009** (testing and CI): the CI record can come from a local Linux run.
+  Amended by **ADR-0035** (2026-11-23): two tiers of CI evidence, the complete record once per batch of related tasks.
 
 ## Context
 * GitHub Actions jobs don't start: the account's billing blocks them (follow-up 11), and the company can't pay for it now.
@@ -42,8 +43,8 @@
 * Renovate updates the Trivy image pin in `tools/ci-local.mjs` (custom manager).
 * **Exception to SEC-DV-3** (branch protection with required checks), as the security standard requires one:
   * risk: without Actions, GitHub can't block a merge that has no passing record;
-  * compensating control: a complete local record for every merged commit, checked by `/task-review` and the task
-    verifier before the merge;
+  * compensating control: a complete local record for the last commit of every batch merged to `main` (ADR-0035),
+    checked by `/task-review` and the task verifier before the merge;
   * owner: the product owner;
   * expiry: when hosted CI is available again, reviewed on 2027-06-30 at the latest.
 * The infra job uses the developer's dev stack, so it runs from the main checkout (with its `infra/compose/.env`), not
