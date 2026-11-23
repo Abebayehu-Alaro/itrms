@@ -12,6 +12,11 @@
 --   itrms_system  BYPASSRLS, only the worker's system pool (outbox relay, sweeps); every use is logged;
 --   itrms_backup  pgBackRest: replication only (a physical backup reads no table through SQL).
 
+-- the ALTER ROLE statements below carry the passwords in their text: keep them out of the server log, whatever the
+-- cluster's log_statement, and out of the error log if one fails (both settings need the superuser this runs as)
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+
 CREATE EXTENSION IF NOT EXISTS ltree;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

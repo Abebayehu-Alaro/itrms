@@ -51,8 +51,11 @@ export function createDatabase(url: string, options: DatabaseOptions = {}): Data
             connectionString: url,
             max,
             application_name: `${options.applicationName ?? 'itrms-api'}${suffix}`,
-            // a statement that runs away is cut, so one request cannot hold a connection for ever
-            statement_timeout: 30_000
+            // a statement that runs away is cut, so one request cannot hold a connection for ever; nor can a wait for a
+            // row lock (lockCurrent's FOR UPDATE) or a transaction left open by a stalled caller
+            statement_timeout: 30_000,
+            lock_timeout: 10_000,
+            idle_in_transaction_session_timeout: 60_000
         });
         // without a listener an idle client's error would end the process; the readiness check reports the outage
         p.on('error', (error) => options.onError?.(error));

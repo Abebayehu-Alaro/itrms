@@ -3,7 +3,7 @@
  * the audited write helpers as itrms_app on a sample table. Every change writes exactly one audit row in its own
  * transaction; a rollback leaves neither; the audit log refuses UPDATE, DELETE and TRUNCATE; a stale row_version is 409.
  */
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -56,6 +56,7 @@ const scratch = notAudited(sample.table('scratch', { ...baseColumns(), note: tex
 
 const password = () => randomBytes(12).toString('hex');
 const PASSWORDS = { owner: password(), app: password(), system: password(), backup: password() };
+const AUDIT_KEY = randomBytes(32).toString('hex');
 
 let container: StartedPostgreSqlContainer;
 let urlFor: (role: string, pw: string) => string;
@@ -66,6 +67,20 @@ let owner: Client;
 async function auditOf(rowId: string) {
     const ownerDb = drizzle(owner);
     return ownerDb.select().from(auditLog).where(eq(auditLog.rowId, rowId)).orderBy(auditLog.at);
+}
+
+/** psql as the container's superuser (what the installation script runs as). */
+const psql = (...args: string[]) =>
+    container.exec(['psql', '-v', 'ON_ERROR_STOP=1', '-U', container.getUsername(), '-d', 'itrms', ...args]);
+
+/** The server log so far (PostgreSQL logs to stderr in the image): read the followed stream briefly, then stop it. */
+async function serverLog(): Promise<string> {
+    const stream = await container.logs();
+    let text = '';
+    stream.on('data', (chunk: Buffer | string) => (text += chunk.toString()));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    stream.destroy();
+    return text;
 }
 
 beforeAll(async () => {
@@ -116,7 +131,7 @@ beforeAll(async () => {
         GRANT USAGE ON SCHEMA sample TO itrms_app;
         GRANT SELECT, INSERT, UPDATE, DELETE ON sample.things, sample.scratch, sample.people TO itrms_app;`);
 
-    db = createDatabase(urlFor('itrms_app', PASSWORDS.app), { auditKey: randomBytes(32).toString('hex') });
+    db = createDatabase(urlFor('itrms_app', PASSWORDS.app), { auditKey: AUDIT_KEY });
 }, 240_000);
 
 afterAll(async () => {
@@ -138,18 +153,20 @@ describe('the role bootstrap and the migrations', () => {
             { rolname: 'itrms_owner', rolbypassrls: false, rolsuper: false },
             { rolname: 'itrms_system', rolbypassrls: true, rolsuper: false }
         ]);
-        const again = await container.exec([
-            'psql',
-            '-v',
-            'ON_ERROR_STOP=1',
-            '-U',
-            container.getUsername(),
-            '-d',
-            'itrms',
-            '-f',
-            '/tmp/roles.psql'
-        ]);
-        expect(again.exitCode).toBe(0);
+        // run again on a cluster that logs every statement: the passwords in the ALTER ROLE statements stay out of the log
+        await psql('-c', "ALTER SYSTEM SET log_statement = 'all'");
+        await psql('-c', 'SELECT pg_reload_conf()');
+        try {
+            const again = await psql('-f', '/tmp/roles.psql');
+            expect(again.exitCode).toBe(0);
+            await psql('-c', "SELECT 'log-probe-0007'");
+            const log = await serverLog();
+            expect(log).toContain('log-probe-0007'); // the cluster did log statements
+            for (const pw of Object.values(PASSWORDS)) expect(log).not.toContain(pw);
+        } finally {
+            await psql('-c', 'ALTER SYSTEM RESET log_statement');
+            await psql('-c', 'SELECT pg_reload_conf()');
+        }
         const { rows: limits } = await owner.query<{ rolname: string; rolreplication: boolean; members: number }>(`
             SELECT r.rolname, r.rolreplication,
                    (SELECT count(*)::int FROM pg_auth_members a WHERE a.member = r.oid) AS members
@@ -282,9 +299,9 @@ describe('the audited write helpers', () => {
         const [insert, update, event] = await auditOf(created.id);
         const text = JSON.stringify([insert?.diff, update?.diff]);
         expect(text).not.toMatch(/JBSWY3DPEHPK3PXP|totpSeed|\+2519110000/);
-        expect(insert?.diff).toMatchObject({
-            after: { name: 'Abebe', phone: expect.stringMatching(/^hmac:[0-9a-f]{64}$/) as string }
-        });
+        // the HMAC covers the table and column too, so the same number cannot be followed from table to table
+        const expected = createHmac('sha256', AUDIT_KEY).update('sample.people.phone\0"+251911000000"').digest('hex');
+        expect(insert?.diff).toMatchObject({ after: { name: 'Abebe', phone: `hmac:${expected}` } });
         // the HMAC proves the phone changed without saying to what
         expect((update?.diff as { before: { phone: string }; after: { phone: string } }).before.phone).not.toBe(
             (update?.diff as { after: { phone: string } }).after.phone

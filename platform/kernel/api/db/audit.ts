@@ -67,8 +67,22 @@ export function plain(value: unknown): unknown {
     return value;
 }
 
+/**
+ * A masked value: an HMAC over the table and column as well as the value, so the same phone number gives a different digest
+ * in each column and the log cannot be joined across tables to follow a person; within one column a change still shows.
+ */
+const maskedValue = (auditKey: string, column: string, value: unknown) =>
+    `hmac:${createHmac('sha256', auditKey)
+        .update(`${column}\0${JSON.stringify(plain(value))}`)
+        .digest('hex')}`;
+
 /** A row as the audit log may hold it: secrets left out, personal fields as an HMAC. */
-function auditable(row: Record<string, unknown>, options: AuditOptions, auditKey?: string): Record<string, unknown> {
+function auditable(
+    table: PgTable,
+    row: Record<string, unknown>,
+    options: AuditOptions,
+    auditKey?: string
+): Record<string, unknown> {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(row)) {
         if (options.omit?.includes(k)) continue;
@@ -77,9 +91,7 @@ function auditable(row: Record<string, unknown>, options: AuditOptions, auditKey
                 v === null || v === undefined
                     ? v
                     : auditKey
-                      ? `hmac:${createHmac('sha256', auditKey)
-                            .update(JSON.stringify(plain(v)))
-                            .digest('hex')}`
+                      ? maskedValue(auditKey, `${nameOf(table)}.${k}`, v)
                       : '[masked]';
             continue;
         }
@@ -145,7 +157,7 @@ export async function insertAudited<T extends BaseTable>(
         action: 'insert',
         table,
         rowId: created.id,
-        diff: { after: auditable(created, auditOptionsOf(table), auditKey) }
+        diff: { after: auditable(table, created, auditOptionsOf(table), auditKey) }
     });
     return created;
 }
@@ -189,8 +201,8 @@ export async function updateAudited<T extends BaseTable>(
     const after = rows[0];
     if (!after) throw new NotFoundError();
     const options = auditOptionsOf(table);
-    const was = auditable(before, options, auditKey);
-    const is = auditable(after, options, auditKey);
+    const was = auditable(table, before, options, auditKey);
+    const is = auditable(table, after, options, auditKey);
     const changed = Object.keys(getTableColumns(table)).filter(
         (k) => !BOOKKEEPING.has(k) && !options.omit?.includes(k) && JSON.stringify(was[k]) !== JSON.stringify(is[k])
     );
@@ -222,7 +234,7 @@ export async function deleteAudited<T extends BaseTable>(
         action: 'delete',
         table,
         rowId: id,
-        diff: { before: auditable(before, auditOptionsOf(table), auditKey) }
+        diff: { before: auditable(table, before, auditOptionsOf(table), auditKey) }
     });
 }
 
